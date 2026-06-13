@@ -1,0 +1,130 @@
+## Product & Architecture Requirements Document (PRD/ARD)## Project Code Name: ReviewPilot (v1.0)
+------------------------------
+## 1. Executive Summary & Problem Space## 1.1 The Core Problem
+Performance reviews are structurally broken for both employees and managers due to three distinct cognitive friction points:
+
+* Recency Bias: Evaluations favor the last 30–60 days of the cycle. Major accomplishments from earlier months are routinely forgotten.
+* Translation Friction: Converting raw engineering output (e.g., bug fixes, code refactoring) into high-impact corporate/HR business language is time-consuming and unnatural for developers.
+* Aggregation Fatigue: Managers managing 5 to 15 direct reports struggle to track, remember, and objectively score peer metrics against custom HR rubrics at the end of the financial year.
+
+## 1.2 Target Audience
+
+* Primary User (IC): Individual software engineers, product owners, and business analysts looking to secure optimal, accurate ratings.
+* Secondary User (Manager): Engineering leads and managers seeking an automated ledger to continuously track peer progress and generate objective feedback.
+
+------------------------------
+## 2. Product Pillars & Design Principles
+
+  ┌─────────────────────────────────────────────────────────────┐
+  │                   PRIVACY-FIRST DESIGN                      │
+  │  Data Sanitization -> Local Masking -> Enterprise Isolation │
+  └──────────────────────────────┬──────────────────────────────┘
+                                 ▼
+  ┌─────────────────────────────────────────────────────────────┐
+  │                 UBIQUITOUS ARCHIVAL INTAKE                  │
+  │      Mobile Micro-Journaling | Integrations | Voice Memos   │
+  └──────────────────────────────┬──────────────────────────────┘
+                                 ▼
+  ┌─────────────────────────────────────────────────────────────┐
+  │                     DYNAMIC AGENT PARSING                   │
+  │     Custom Rubric Ingestion -> LLM Mapping -> Evaluation    │
+  └─────────────────────────────────────────────────────────────┘
+
+
+* Privacy & Compliance First: Corporate intellectual property (IP), proprietary code snippets, and personally identifiable information (PII) must never escape the user's controlled cloud boundary. No data is used to train public LLM models.
+* Frictionless Ubiquity: Intake must take less than 30 seconds via voice, mobile micro-journaling, or background webhooks.
+* Extreme Rubric Flexibility: The database and parsing layer must mold to any organizational appraisal template (MBOs, OKRs, Competency matrices, or numerical scales).
+
+------------------------------
+## 3. High-Value Feature Specifications## 3.1 Dual-Persona Portals## Employee Persona
+
+* The Micro-Journal Timeline: An infinite scroll, mobile-first feed to drop raw text inputs, screenshots, or code fragments.
+* The Sync Matrix: A portal to copy-paste or drop a PDF/DOCX copy of the current year’s performance goals, multipliers, and explicit rubric criteria (e.g., 5/Exceptional = 4+ QMS process improvements).
+* The Narrative Engine: Generates tailored self-evaluations mapping chronological logs directly to specific goal buckets, optimized for target tiers.
+
+## Manager Persona
+
+* Team Ledger View: A secure dashboard grouping direct reports. Managers can drop quick observational notes, peer praise, or metric check-ins throughout the year.
+* Continuous Feedback Builder: Periodically prompts the manager to summarize direct-report performance, removing end-of-year writing jams.
+* Objective Review Matcher: Evaluates team outputs directly against corporate performance criteria to ensure uniform, unbiased rating distribution across the organization.
+
+## 3.2 AI Core & Agentic Workflows## Component A: The Ingestion Sanitizer (Privacy Guard)
+Before any text is saved or shipped to downstream vector storage/LLM processing, a local deterministic regex and Named Entity Recognition (NER) pipeline automatically detects, flags, and redacts or masks:
+
+* Proprietary hostnames, internal database identifiers, and internal source code links.
+* Customer/Client account names (replaced with generalized classifications, e.g., [Client_A]).
+* PII (Protected health info, financial metrics, phone numbers).
+
+## Component B: The Metric/Rubric Parser
+An LLM semantic engine tokenizes highly variable corporate performance files. It extracts:
+
+   1. Core Goals: (e.g., "Professional Development").
+   2. Target Benchmarks: (e.g., "Complete 2+ classes").
+   3. Tier Matrix Rules: (e.g., "Exceptional = 5+ classes").
+
+## Component C: Retrieval-Augmented Generation (RAG) & Corporate Translator
+When synthesis is requested, the system performs a semantic vector search over the user's localized journal logs using the extracted rubric categories as search embeddings. The generative model takes the retrieved logs and applies a target corporate tone layer:
+
+* Input log: "Fixed a nasty bug where large zips were failing download today on prod."
+* Output generation: "Executed an exhaustive Decision Analysis and Resolution (DAR) process to optimize large data payloads via ZIP multi-part file splitting, eliminating server timeouts and ensuring high infrastructure stability."
+
+------------------------------
+## 4. Technical Architecture Blueprint## 4.1 Hybrid Storage & Database Schema Strategy
+To handle highly volatile company structures, a hybrid relational/document model is required. Postgres with the pgvector extension provides transactional integrity for operational logs while allowing loose JSON metadata storage for unique evaluation rubrics.
+
+       ┌───────────────────────┐
+       │     users / teams     │
+       └───────────┬───────────┘
+                   │ 1:N
+       ┌───────────▼───────────┐
+       │     journal_logs      │
+       │ ───────────────────── │
+       │  - id: UUID           │
+       │  - reporter_id: FK    │
+       │  - target_user_id: FK │
+       │  - raw_text: TEXT     │
+       │  - clean_text: TEXT   │
+       │  - vectors: VECTOR    │
+       │  - metadata: JSONB    │
+       └───────────┬───────────┘
+                   │ N:1 (Dynamic Virtual Mapping)
+       ┌───────────▼───────────┐
+       │   evaluation_rubrics  │
+       │ ───────────────────── │
+       │  - id: UUID           │
+       │  - org_id: UUID       │
+       │  - template: JSONB    │◄── Captures nested nested JSON
+       └───────────────────────┘    (e.g., 5/Exceeds, 4/Meets keys)
+
+## 4.2 Cloud Infrastructure (AWS Native Strategy)
+Leveraging enterprise security paradigms, the backend architecture maps cleanly to AWS managed services:
+
+[Mobile / Web Application]
+           │
+           ▼
+   [AWS API Gateway] ──► [Cognito Federated Identity]
+           │
+           ▼
+ [AWS Lambda / ECS Fargate] (Node.js/Python Fast-API Core Engine)
+           │
+           ├──► [Amazon Aurora PostgreSQL + pgvector] (User Session & Text Embeddings)
+           │
+           └──► [Amazon Bedrock / AWS PrivateLink] (Claude 3.5 Sonnet / Llama 3 Infrastructure)
+
+------------------------------
+## 5. Security, Risk, & Compliance Guardrails
+
+* Model Zero-Retention: All API handshakes with foundational models via Amazon Bedrock are executed under explicit opt-out terms ensuring zero prompt logging, zero context retention, and zero exposure to fine-tuning pipelines.
+* Data at Rest & Motion Isolation: All logs are encrypted using envelope encryption via AWS KMS keys unique to the specific user/tenant.
+* Manager Data Access Restrictions: A strict Role-Based access fence prevents managers from seeing an employee's private daily journal reflection unless the employee explicitly flags an entry as "Shared with Manager for Review Alignment."
+
+------------------------------
+## 6. Next Steps for Refinement
+To move this documentation closer to an engineering build, we must define:
+
+   1. The specific JSON payload design capable of universally modeling multi-tier corporate performance scoring (e.g., alpha scales vs. numeric 1-5 scales).
+   2. The core prompt sequencing pipeline required to feed filtered logs into an LLM and generate accurate, high-fidelity corporate narratives without hallucinations.
+
+------------------------------
+How would you like to advance this specification? We can drill down into the JSON schema definition for the flexible rubric table, or map out the precise AI prompting strategy for the "Corporate Translator" engine.
+
