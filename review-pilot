@@ -273,5 +273,152 @@ This structural document safely links metadata, tags, role credits, and system v
 }
 
 ------------------------------
-This documentation expansion addresses the practical requirements needed to model, parse, secure, and compile a modern performance review system. You can archive this requirements block directly in your project repository to use as your technical baseline whenever you are ready to build the app!
+## 🚀 AI Feature Module: The "Query Pilot" Conversational Engine
+To support both personas seamlessly, we add a real-time conversational query layer. This is powered by an internal Semantic Retrieval-Augmented Generation (RAG) pipeline. It allows users to ask open-ended questions about their data using natural language, serving as an instant memory assistant.
+## 1. Manager-Persona Use Cases (The Talent Appraisal Query)
+Instead of manually digging through a year of scattered Slack praise, performance dashboards, and meeting metrics, a manager can use simple conversational prompts during the evaluation cycle:
+
+* Prompt: "Summarize what employee Mohammad Morshed did this year for our 'Team/Peer Development' criteria."
+* AI Engine Execution: The engine identifies the user_id for Mohammad Morshed, isolates logs tagged under PEER_DEVELOPMENT or semantically related to "sharing/training", tracks down relevant entries, and drafts a precise, objective summary.
+   * AI Output Response: "During this cycle, Mohammad excelled in Peer Development, holding 9 total training sessions (exceeding the target tier of 4). Notably, he conducted 7 live technical deep-dives (e.g., Scoped PBAC/RBAC on April 24, 2026) and recorded 2 mandatory developer workshops to establish evergreen onboarding resources for the team."
+* Prompt: "Give me all high-priority production defects resolved by employee Jane Doe between September and December."
+* Prompt: "What are some constructive obstacles John Smith encountered this year, and how did he mitigate them?"
+
+## 2. Employee-Persona Use Cases (The Self-Advocacy Query)
+Employees can query their own secure, private database to prepare for live 1-on-1 review syncs with their managers, ensure they didn't miss anything, or double-check their data against the rubric targets.
+
+* Prompt: "Did I meet the criteria for an 'Exceptional' score under our QMS process improvement goals?"
+* AI Engine Execution: The engine matches the internal rubric criteria requirements ("5/Exceptional = You submitted 4+ process improvements or nominations") against the user's personal log database metrics.
+   * AI Output Response: "Yes, you are currently qualifying for the Exceptional tier. You have a total of 5 verifiable actions: 3 formal Associate of the Month award nominations submitted/won, 1 formal QMS submission (CPI 012545: Split of MDP Invoices), and multiple collaborative policy revisions published in QMS360 with the FES Mainframe Team."
+* Prompt: "Remind me of the exact dates and system impact of the database optimizations I rolled out this winter."
+* Prompt: "Summarize how I supported the QA testing team over the past year so I can speak to it in my meeting today."
+
+------------------------------
+## 🏗️ Technical Implementation: Conversational RAG Architecture
+To prevent data leaks between employees and managers, the conversational engine utilizes strict semantic boundaries within the backend orchestration service.
+
+       [ Conversational UI (Chat Bubble / Search Bar) ]
+                              │
+                              ▼
+                 [ Prompt Parser (LLM Guard) ]
+                              │
+          ┌───────────────────┴───────────────────┐
+          ▼                                       ▼
+ [ Employee Persona Route ]              [ Manager Persona Route ]
+  - Enforce Active Session                - Validate Manager-to-Report Mapping
+  - Query Only Personal User ID           - Restrict Queries to Shared Logs Only
+          │                                       │
+          └───────────────────┬───────────────────┘
+                              ▼
+            [ Semantic Vector Search (pgvector) ]
+  (Extracts top-K chronological context blocks matching the query)
+                              │
+                              ▼
+            [ Context-Injected Prompt Generator ]
+  (Merges original query + sanitized database facts + system instructions)
+                              │
+                              ▼
+          [ Private LLM Processing (Amazon Bedrock) ]
+                              │
+                              ▼
+              [ Markdown-Formatted Direct Answer ]
+
+## Key Engineering Guardrails for Queries:
+
+   1. Strict Security Mapping (Manager Boundary): A manager's chat session cannot bypass the organizational chart security layer. The database enforces Row-Level Security (RLS). If a manager queries an employee who is not their direct report, the system returns an access-denied error.
+   2. No Cross-Contamination: The prompt template ensures that an employee's completely private emotional reflections ("Feeling burned out by this bug today") are stripped out of any summary query executed by a manager. The manager's query engine only indexes logs marked with the metadata flag visibility: "SHARED_WITH_MANAGER" or operational data pulled from integrations (Jira, GitHub).
+   3. Fact Anchor Validation: To stop the AI from making things up (hallucinating), the system prompt tells the LLM: "Base your summary strictly on the chronological logs provided. If a specific date, metric, or project is not present in the retrieved logs, state that you cannot find documentation for it—do not assume or manufacture data."
+
+------------------------------
+## 📋 Updated JSON Schema Component (Query History Ledger)
+Add this table schema to your database blueprint to log, audit, and cache these conversational requests for quick page loads:
+
+{
+  "$schema": "https://json-schema.org",
+  "title": "ReviewPilotQueryLog",
+  "type": "object",
+  "properties": {
+    "query_id": { "type": "string", "format": "uuid" },
+    "actor_user_id": { "type": "string", "format": "uuid" },
+    "target_user_id": { "type": "string", "format": "uuid" },
+    "role_context": { "type": "string", "enum": ["SELF_EMPLOYEE", "DIRECT_MANAGER"] },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "parsed_query": { "type": "string", "example": "Summarize process improvements for Mohammad" },
+    "retrieved_log_refs": {
+      "type": "array",
+      "items": { "type": "string", "format": "uuid" }
+    },
+    "generated_response": { "type": "string" }
+  },
+  "required": ["query_id", "actor_user_id", "target_user_id", "role_context", "timestamp", "parsed_query", "generated_response"]
+}
+
+------------------------------
+Adding this feature turns the platform from a basic note-taking logger into an essential operational cockpit. Managers can compile feedback for an entire department in a single afternoon, and employees can instantly ground their career progression discussions in hard, undeniable data.
+Let me know if you would like to map out the exact LLM system instructions for this query engine to keep manager summaries completely objective!
+------------------------------
+
+This template acts as a structural contract. It will work identically whether you pipe it into an open-source model running on your local machine (like Llama 3) or an enterprise cloud API (like AWS Bedrock Claude 3.5 Sonnet) in the future.
+Here is the exact System Prompt Framework you can save in your project files. It enforces the strict privacy, security, and data-accuracy boundaries you need for both the Employee and Manager query modes.
+------------------------------
+## 10. Universal LLM Prompt Engineering Blueprint## 10.1 System Prompt: Employee Self-Query & Narrative Generator
+When an employee asks questions about their own data, use this configuration to guide the LLM's behavior: [5] 
+
+CONTEXT:
+You are an elite, objective Executive Performance Coach and Technical Writer built into the "ReviewPilot" platform. Your job is to help the user review their personal achievements, verify their progress against company rubrics, and translate raw engineering tasks into high-density corporate impact narratives.
+
+INPUT DATA PROVIDED BY BACKEND:
+1. <User_Query>: The specific question or request from the employee.
+2. <Company_Rubrics>: The grading scale or target criteria for the current review cycle.
+3. <Retrieved_Logs>: A collection of time-stamped, sanitized journal logs extracted from the user's database.
+
+CRITICAL BEHAVIORAL INSTRUCTIONS:
+1. STRICT FACTUAL ANCHORING: You must rely ONLY on the provided <Retrieved_Logs>. If the user asks about a project, metric, or event that is not documented in the logs, explicitly state: "I cannot find any documentation for that item in your logs." Do NOT manufacture, assume, or hallucinate projects or metrics.
+2. CORPORATE TRANSLATION LAYER: When summarizing achievements, translate technical shorthand into professional, metric-driven business language. 
+   - Convert "Fixed a slow download bug" to "Executed a system optimization to eliminate latency and preserve infrastructure stability."
+   - Convert "Helped the QA team with testing" to "Acted as a cross-functional technical anchor, mitigating deployment risks by generating test datasets and unblocking QA testing teams."
+3. SECURITY BOUNDARY: Never reference raw internal server paths, specific IP addresses, or unmasked PII. Stick to the generalized placeholders provided in the sanitized logs.
+
+OUTPUT FORMAT:
+Return your response in clean, highly scannable Markdown using bold visual anchors and punchy bullet points. Lead with a direct summary statement.
+
+------------------------------
+## 10.2 System Prompt: Manager Appraisal & Team Summary Engine
+When a manager queries an employee's data, swap the configuration to this template to enforce an objective, non-biased appraisal framework:
+
+CONTEXT:
+You are an unbiased, objective Management Consultant and HR Auditor built into the "ReviewPilot" platform. Your role is to help a manager instantly synthesize the documented, shared contributions of a direct report against official company evaluation criteria.
+
+INPUT DATA PROVIDED BY BACKEND:
+1. <Manager_Query>: The question or summary request from the team leader.
+2. <Target_Employee_Meta>: Name, title (e.g., Senior Developer), and role context.
+3. <Company_Rubrics>: The specific goals and performance thresholds.
+4. <Shared_Logs>: ONLY the logs explicitly flagged as shared, public team contributions, or pulled via authorized system integrations (Jira, GitHub).
+
+CRITICAL BEHAVIORAL INSTRUCTIONS:
+1. ABSOLUTE EMOTIONAL FILTERING: You must completely ignore and strip out any personal, emotional, or psychological entries (e.g., expressions of stress, fatigue, or interpersonal venting). Focus strictly on operational output, business metrics, and documented facts.
+2. ANTI-BIAS ENFORCEMENT: Evaluate the data chronologically across the entire log timeline. Actively counter "recency bias" by ensuring wins from early in the performance year receive equal structural weight as recent wins.
+3. OBJECTIVE TIER MATCHING: Group achievements explicitly under the requested rubric headers. If the manager asks "Did they meet the criteria?", clearly count the verifiable actions (e.g., "The data shows 4 distinct knowledge-sharing sessions, satisfying the requirement for the Exceptional tier").
+4. HALLUCINATION PROTECTION: Do not infer behavior. If a log says "Attended meeting," do not translate it to "Led meeting" unless explicit action tokens (e.g., presented, demonstrated, spearheaded) are attached to that log.
+
+OUTPUT FORMAT:
+Return a highly structured, objective summary using Markdown. Use clear headers for each goal category, bulleted fragments for specific dates/contributions, and a concluding evaluation metrics alignment check.
+
+------------------------------
+## 💡 Why having these prompts ready now is an engineering win:
+
+   1. It acts as code documentation: When you pick this project up later, these prompts explain exactly how your microservices need to stitch data together before making an AI API call.
+   2. LLM Agnostic: You can literally copy-paste these exact text blocks into a prompt playground (like Anthropic Console, OpenAI Playground, or AWS Bedrock Text Playground) on day one of coding to watch your system work instantly. [6, 7, 8] 
+
+This completely rounds out your structural blueprint! You now have the problem statement, database models, cloud architecture diagrams, edge case handlers, and prompt blueprints captured while the concepts are fresh in your mind.
+Whenever you are ready to start coding or refining the system code modules, this documentation will serve as your flawless architectural baseline.
+
+[1] [https://www.myidcm.com](https://www.myidcm.com/blog/llms-txt)
+[2] [https://codingscape.com](https://codingscape.com/blog/andrej-karpathys-deep-dive-into-llms-video)
+[3] [https://pieces.app](https://pieces.app/blog/why-llm-agnostic-solutions-are-the-future-of-dev-tools)
+[4] [https://www.aiperspectives.com](https://www.aiperspectives.com/large-language-models/)
+[5] [https://arxiv.org](https://arxiv.org/html/2404.18001v1)
+[6] [https://medium.com](https://medium.com/data-science-at-microsoft/building-gpt-3-applications-beyond-the-prompt-504140835560)
+[7] [https://medium.com](https://medium.com/@yxinli92/fine-tuning-models-with-amazon-bedrock-a-step-by-step-guide-34122f91ea9c)
+[8] [https://www.linkedin.com](https://www.linkedin.com/pulse/prompt-masters-playbook-how-effective-ai-prompting-can-bryan-blair-ayjde)
 
