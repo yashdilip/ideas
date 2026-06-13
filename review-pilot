@@ -126,5 +126,152 @@ To move this documentation closer to an engineering build, we must define:
    2. The core prompt sequencing pipeline required to feed filtered logs into an LLM and generate accurate, high-fidelity corporate narratives without hallucinations.
 
 ------------------------------
-How would you like to advance this specification? We can drill down into the JSON schema definition for the flexible rubric table, or map out the precise AI prompting strategy for the "Corporate Translator" engine.
+Here is a comprehensive set of additions to your document. These capture the exact real-world engineering pain points, workflows, and edge cases you dealt with during your own review cycle, ensuring they are preserved for future implementation.
+------------------------------
+## 7. Advanced Functional & Technical Extensions## 7.1 "Vibe Coding" vs. "Agentic Engineering" Log Classifier
+Because modern engineering heavily utilizes AI coding tools, a standard tracker won't capture the actual complexity of your work. The app requires an automated classification layer for AI-assisted tasks.
+
+* The Problem: Reviewers might look down on AI-assisted code moves as low-effort ("vibe coding"), missing the complex architecture, prompt engineering, and context building required to guide the agent.
+* The Feature: When a user logs an entry involving an AI coding agent, the UI provides fields to capture the engineering discipline behind it:
+* Context Boundary Management: How the user structured the codebase context for the agent.
+   * Prompt Architecture Strategy: The logic used to direct the agent.
+   * Human-in-the-Loop Validation: The testing, benchmarking, and refactoring the developer performed to verify the agent's output.
+* The Translation: The AI outputs this into the review as: "Pioneered AI-assisted development workflows, leveraging agentic software engineering paradigms to accelerate prototyping velocity while maintaining strict code quality standards."
+
+## 7.2 The "Defensive Metric" Safe-Room (Issue Mitigation)
+Your goal matrix included a requirement to maintain "3 or less production issues." This is a defensive metric—it only tracks when things go wrong, rather than when things go right.
+
+* The Feature: A dedicated tracker for production defects where the user was the primary developer or code reviewer.
+* The Pivot Mechanics: If an issue occurs, the app doesn't just log the defect; it forces the user to immediately log the remediation steps and proactive actions taken:
+* Root cause analysis (RGA) details.
+   * Immediate code-fix details and automated test expansions to prevent recurrence.
+   * Direct user/client communication sessions to resolve the impact.
+* The Output Result: At the end of the year, instead of a manager seeing a negative production defect log, the app automatically generates a narrative highlighting first-hand defect isolation, fast turnaround resolution times, and application security hardening.
+
+## 7.3 Intermittent & Collaborative Policy Upgrades (The Document Tracker)
+Often, engineers spend days revising policies, instructions, or internal wiki pages in systems like QMS360 or GitHub Wiki. These are critical contributions but are highly fragmented and easily forgotten.
+
+* The Feature: A document-lifecycle tracker within the micro-journal.
+* Data Fields:
+* Document Name / ID: (e.g., SY-TPA Systems MDP Run Instructions).
+   * Role Badge: Explicit toggle between Submitter (I authored this) or Contributor (I was included in a collaborative group or someone else's submission).
+   * Platform Target: (e.g., QMS360, GitHub Wiki, Confluence).
+* Why it matters: This ensures the app accurately satisfies strict HR criteria regarding authorship credit (matching the specific Submitter vs. Contributor tracking requirement from your process improvement goals).
+
+## 7.4 The "Recorded Assets" Evergreen Vault
+Technical demos, training sessions, and lunch-and-learns are often evaluated highly because they create reusable value for the organization.
+
+* The Feature: An internal registry specifically for educational sessions, with an added flag for [RECORDED].
+* The AI Synthesis: When compiling the review, the system automatically elevates recorded items by adding a strategic business value statement to the text: "Developed reusable, evergreen training assets recorded and archived to serve as long-term engineering onboarding resources."
+
+------------------------------
+## 8. Deep-Dive Edge Cases & Failure Modes
+Capturing these edge cases now protects the application's architecture from breaking when it encounters messy real-world corporate data.
+
+| Edge Case | The Engineering Risk | The App Solution / Guardrail |
+|---|---|---|
+| The Mid-Year Rubric Change | Corporate goals or team structures change halfway through the year, making old logs irrelevant to the new categories. | Implement Temporal Versioning on the evaluation_rubrics table. Logs retain their original vector embeddings but can be dynamically re-mapped to the new rubric versions at runtime. |
+| The Redaction Hallucination | The local AI engine accidentally over-redacts common engineering words (e.g., masking standard frameworks like "Spring Security" as proprietary code). | Maintain a strict, localized Whitelisting Dictionary of industry-standard tech terms, libraries, and protocols that the PII/SPI sanitizer cannot modify. |
+| Manager-Peer Cross-Contamination | A manager uses the app to track feedback for their team, risking an employee's private personal reflections leaking into the manager's ledger. | Enforce absolute database isolation via Row-Level Security (RLS) in Postgres. Peer feedback logs authored by a manager exist in an entirely separate schema namespace from an employee’s self-tracked journal logs. |
+| The Ghost Multiplier (Hidden Criteria) | HR text uses non-standard scoring scales (e.g., evaluating performance based on an "Alpha-Scale" A/B/C rather than numerical 1–5 rankings). | Build a Normalized Score Translator into the JSON schema, mapping any custom company scale back to a universal 5-tier internal standard (Low, Developing, Proficient, Advanced, Exceptional). |
+
+------------------------------
+## 9. Comprehensive JSON Schema Blueprint (Flexible Rubrics & Logs)
+This raw JSON structure provides a highly flexible schema for a relational/document database system, allowing it to adapt to variable corporate formats.
+## 9.1 The Evaluation Rubric Template Schema (evaluation_rubrics)
+This schema models any company's goals, conditions, and multi-tier scoring rules within a flexible JSON object:
+
+{
+  "$schema": "https://json-schema.org",
+  "title": "EvaluationRubricTemplate",
+  "type": "object",
+  "properties": {
+    "rubric_id": { "type": "string", "format": "uuid" },
+    "organization_name": { "type": "string" },
+    "cycle_period": { "type": "string", "example": "2025-2026" },
+    "scoring_type": { "type": "string", "enum": ["NUMERIC", "ALPHA", "TEXTUAL"] },
+    "goals": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "goal_id": { "type": "string" },
+          "goal_title": { "type": "string" },
+          "weight_percentage": { "type": "integer" },
+          "core_requirements": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "scoring_matrix": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "score_tier": { "type": "string", "example": "5/Exceptional" },
+                "min_actions_required": { "type": "integer" },
+                "explicit_criteria_keywords": {
+                  "type": "array",
+                  "items": { "type": "string" }
+                },
+                "description": { "type": "string" }
+              },
+              "required": ["score_tier", "description"]
+            }
+          }
+        },
+        "required": ["goal_id", "goal_title", "scoring_matrix"]
+      }
+    }
+  },
+  "required": ["rubric_id", "organization_name", "cycle_period", "goals"]
+}
+
+## 9.2 The Sanitized Journal Log Schema (journal_logs)
+This structural document safely links metadata, tags, role credits, and system vectors to the timeline feed:
+
+{
+  "$schema": "https://json-schema.org",
+  "title": "SanitizedJournalLog",
+  "type": "object",
+  "properties": {
+    "log_id": { "type": "string", "format": "uuid" },
+    "user_id": { "type": "string", "format": "uuid" },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "visibility": { "type": "string", "enum": ["PRIVATE", "SHARED_WITH_MANAGER"] },
+    "content": {
+      "type": "object",
+      "properties": {
+        "raw_user_input": { "type": "string" },
+        "sanitized_text": { "type": "string" },
+        "redacted_entities": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "entity_type": { "type": "string", "example": "CLIENT_NAME" },
+              "original_length": { "type": "integer" },
+              "masked_as": { "type": "string", "example": "[Client_A]" }
+            }
+          }
+        }
+      },
+      "required": ["raw_user_input", "sanitized_text"]
+    },
+    "classification_metadata": {
+      "type": "object",
+      "properties": {
+        "primary_category": { "type": "string", "enum": ["PROCESS_IMPROVEMENT", "CODE_QUALITY", "PEER_DEVELOPMENT", "PERSONAL_GROWTH", "INFRASTRUCTURE"] },
+        "action_role": { "type": "string", "enum": ["SUBMITTER", "CONTRIBUTOR", "LEAD", "RECIPIENT", "NONE"] },
+        "associated_ticket_or_cpi": { "type": "string", "nullable": true },
+        "is_recorded_asset": { "type": "boolean", "default": false },
+        "ai_agent_used": { "type": "boolean", "default": false }
+      },
+      "required": ["primary_category", "action_role"]
+    }
+  },
+  "required": ["log_id", "user_id", "timestamp", "content", "classification_metadata"]
+}
+
+------------------------------
+This documentation expansion addresses the practical requirements needed to model, parse, secure, and compile a modern performance review system. You can archive this requirements block directly in your project repository to use as your technical baseline whenever you are ready to build the app!
 
