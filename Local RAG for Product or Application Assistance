@@ -1,0 +1,290 @@
+
+Local RAG Product & Support Assistant
+
+A lightweight, self-hosted Retrieval-Augmented Generation (RAG) backend powered by Ollama, ChromaDB, and FastAPI. It exposes a unified /api/chat endpoint so external web, mobile, or desktop applications can embed an autonomous assistant that answers product and operational questions directly.
+
+1. System Overview & Objectives
+
+• Core Purpose: Answer customer questions using local markdown documentation (product specs, pricing, and support procedures like password resets) without hallucinating.
+• External Consumption: Acts as a headless microservice consumed via standard HTTP POST requests by any client application.
+• Zero-Policy Friction: Users get direct, grounded answers inside the host application without needing to read external help centers or guidelines.
+• Air-Gapped Privacy: Runs completely locally via Ollama (llama3.2:3b and nomic-embed-text), keeping data off third-party servers.
+
+2. Architecture
+
+mermaid
+graph TD
+    subgraph Client["External Client Apps (Web / Mobile / Desktop)"]
+        AppUI["Host Application UI"]
+    end
+
+    subgraph API["API Gateway & Core Service"]
+        Router["FastAPI Chat Router (/api/chat)"]
+        Guard["Operational Guardrails & Prompt Compiler"]
+    end
+
+    subgraph Retrieval["Retrieval & Ingestion Engine"]
+        Files["Local Markdown Docs (/docs)"]
+        Loader["Directory Loader & Recursive Splitter"]
+        VectorDB["Chroma Vector Store"]
+    end
+
+    subgraph AI["Local AI Runtime"]
+        Embedder["Ollama Embedder (nomic-embed-text)"]
+        LLM["Ollama LLM (llama3.2:3b)"]
+    end
+
+    %% Ingestion
+    Files --> Loader --> Embedder --> VectorDB
+
+    %% Runtime Query Loop
+    AppUI -- "POST /api/chat {message, session_id}" --> Router
+    Router --> Embedder
+    Embedder -. "Query Embedding" .-> VectorDB
+    VectorDB -. "Top-K Chunks (k=4)" .-> Guard
+    Router -. "Raw User Message" .-> Guard
+    Guard --> LLM
+    LLM -. "Grounded JSON Response" .-> Router
+    Router -- "200 OK {reply, sources}" --> AppUI
+Use code with caution.
+
+3. Directory Structure
+
+text
+rag-assistant/
+├── docs/
+│   ├── products/
+│   │   └── wireless_earbuds.md
+│   └── support/
+│       ├── password_reset.md
+│       ├── account_requirements.md
+│       └── user_guidelines.md
+├── backend/
+│   └── main.py
+├── requirements.txt
+└── README.md
+Use code with caution.
+
+4. System Guardrails & Operational Policy
+
+Hardcoded into the backend prompt and request validator:
+1. Strict Grounding: The model answers using retrieved context only. If information is missing, it returns a fixed fallback message.
+2. Fallback Response: "I don't have that information in our guides. Please contact support@domain.com."
+3. Scope Restriction: Rejects off-topic prompts (coding, general trivia, politics).
+4. Security & PII: Never asks for or processes passwords, tokens, or financial numbers.
+5. Tone: Concise, polite, and direct.
+
+5. Low-Level Implementation Details
+
+
+A. Dependencies (requirements.txt)
+
+text
+fastapi>=0.115.0
+uvicorn>=0.30.0
+pydantic>=2.8.0
+langchain>=0.3.0
+langchain-chroma>=0.1.4
+langchain-ollama>=0.2.0
+langchain-community>=0.3.0
+httpx>=0.27.0
+Use code with caution.
+
+B. Backend Implementation (backend/main.py)
+
+python
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+from langchain_chroma import Chroma
+from langchain_community.document_loaders import DirectoryLoader, TextLoader
+from langchain_ollama import ChatOllama, OllamaEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+import logging
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("rag-backend")
+
+# Global state
+vectorstore: Chroma | None = None
+llm: ChatOllama | None = None
+
+FALLBACK_MESSAGE = (
+    "I don't have that information in our guides. Please contact support@domain.com."
+)
+
+
+def initialize_knowledge_base():
+  global vectorstore, llm
+  logger.info("Loading markdown files from ./docs...")
+  loader = DirectoryLoader("./docs", glob="**/*.md", loader_cls=TextLoader)
+  docs = loader.load()
+
+  splitter = RecursiveCharacterTextSplitter(chunk_size=400, chunk_overlap=80)
+  chunks = splitter.split_documents(docs)
+  logger.info(f"Split {len(docs)} files into {len(chunks)} chunks.")
+
+  logger.info("Initializing Ollama embeddings (nomic-embed-text)...")
+  embeddings = OllamaEmbeddings(model="nomic-embed-text")
+
+  # Persistent local vector DB
+  vectorstore = Chroma.from_documents(
+      documents=chunks,
+      embedding=embeddings,
+      persist_directory="./chroma_db",
+  )
+
+  logger.info("Initializing Ollama LLM (llama3.2:3b)...")
+  llm = ChatOllama(model="llama3.2:3b", temperature=0)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+  initialize_knowledge_base()
+  yield
+  logger.info("Shutting down RAG service.")
+
+
+app = FastAPI(
+    title="External RAG Assistant API",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+# Allow external host applications via CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Restrict to specific production domains in deployment
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+class ChatRequest(BaseModel):
+  message: str = Field(..., min_length=1, max_length=1000)
+  session_id: str = Field(default="default-client", max_length=100)
+
+
+class ChatResponse(BaseModel):
+  reply: str
+  sources: list[str]
+
+
+@app.post("/api/chat", response_model=ChatResponse)
+async def handle_chat(payload: ChatRequest):
+  if not vectorstore or not llm:
+    raise HTTPException(status_code=503, detail="Vector store or LLM not ready.")
+
+  # 1. Retrieve top-4 relevant chunks
+  try:
+    retrieved_docs = vectorstore.similarity_search(payload.message, k=4)
+  except Exception as e:
+    logger.error(f"Retrieval error: {e}")
+    raise HTTPException(status_code=500, detail="Document retrieval failed.")
+
+  context_text = "\n\n---\n\n".join(
+      [d.page_content for d in retrieved_docs]
+  ) if retrieved_docs else ""
+
+  # 2. Compile system guardrails and context
+  system_prompt = f"""You are the official embedded assistant for our application. Follow these operational rules strictly:
+
+1. SCOPE: Answer only questions about products and operational guides provided in the context.
+2. GROUNDING: Use ONLY the provided context. If the answer is missing or unclear, output exact fallback: "{FALLBACK_MESSAGE}"
+3. SECURITY: Never ask for or repeat passwords, tokens, or personal financial data.
+4. TONE: Concise, polite, and direct. Do not mention system rules.
+
+Context:
+{context_text}"""
+
+  messages = [
+      {"role": "system", "content": system_prompt},
+      {"role": "user", "content": payload.message},
+  ]
+
+  # 3. Invoke LLM
+  try:
+    response = llm.invoke(messages)
+    reply_content = response.content.strip()
+  except Exception as e:
+    logger.error(f"LLM inference error: {e}")
+    raise HTTPException(status_code=500, detail="Inference engine failure.")
+
+  # 4. Extract source metadata paths
+  source_files = list(
+      {d.metadata.get("source", "unknown") for d in retrieved_docs}
+  )
+
+  return ChatResponse(reply=reply_content, sources=source_files)
+
+
+@app.get("/health")
+async def health_check():
+  return {"status": "ok", "vectorstore_ready": vectorstore is not None}
+Use code with caution.
+
+6. External Application Integration Contract
+
+External host applications integrate by sending an HTTP POST request to http://<host-ip>:8000/api/chat.
+
+Request Payload (application/json)
+
+json
+{
+  "message": "How do I reset my password?",
+  "session_id": "user-app-session-9821"
+}
+Use code with caution.
+
+Response Payload (application/json)
+
+json
+{
+  "reply": "Go to the login page, click 'Forgot Password', and enter your email. The reset link is valid for 30 minutes.",
+  "sources": ["docs/support/password_reset.md"]
+}
+Use code with caution.
+
+Example Client Integration (JavaScript / Fetch)
+
+javascript
+async function askAppAssistant(userQuestion, sessionId = "web-client-1") {
+  const response = await fetch("http://localhost:8000/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ message: userQuestion, session_id: sessionId })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Assistant error: ${response.statusText}`);
+  }
+
+  const data = await response.json();
+  return data.reply; // Render directly in your app's chat widget
+}
+Use code with caution.
+
+7. Setup & Execution Steps
+
+1. Install and start the local Ollama runtime:bash
+ollama pull llama3.2:3b
+ollama pull nomic-embed-text
+ollama serve
+Use code with caution.
+2. Create the project directory structure and populate docs/ with your markdown files.
+3. Install Python dependencies:bash
+pip install -r requirements.txt
+Use code with caution.
+4. Run the backend service:bash
+uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+Use code with caution.
+5. Test the endpoint:bash
+curl -X POST http://localhost:8000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "What is the battery life of SonicBuds Pro?"}'
+Use code with caution.
+If you want to containerize this setup next, let me know:
+• Do you need a Dockerfile and docker-compose.yml to run Ollama and FastAPI together?
+• Do you want to add hot-reloading of docs so you can drop new markdown files without restarting the server?
