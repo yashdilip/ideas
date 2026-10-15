@@ -437,3 +437,61 @@ If your laptop fans spin too loud or responses take over 5 seconds, would you li
 • Switch to an even smaller 270MB model (gemma3:270m)?
 • Run Ollama natively on the host OS (ollama serve) instead of inside Docker to reclaim 15–20% CPU overhead?
 
+Running Ollama natively on your host OS (ollama serve) instead of inside Docker cuts CPU overhead and keeps laptop fans quiet, while keeping your FastAPI app neatly containerized (or run directly via Python).
+
+1. Start Ollama Natively on Your Laptop
+
+1. Download and run the native app from Ollama Official Site.
+2. Pull the lean CPU models in your terminal:bash
+ollama pull qwen3:1.7b
+ollama pull nomic-embed-text
+Use code with caution.
+3. Verify it runs on port 11434:bash
+curl http://localhost:11434/api/tags
+Use code with caution.
+
+2. Simplified `docker-compose.yml` (App Only)
+
+Point the API container to your host machine's Ollama instance using host.docker.internal (or 172.17.0.1 on Linux):
+yaml
+version: '3.8'
+
+services:
+  rag-api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: rag-api-service
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file: .env
+    volumes:
+      - ./docs:/app/docs:ro
+      - chroma_data:/app/chroma_db
+
+volumes:
+  chroma_data:
+    driver: local
+Use code with caution.
+
+3. Updated `.env` for Native Host
+
+ini
+APP_API_KEY=laptop_dev_key_123
+OLLAMA_BASE_URL=http://docker.internal
+DOCS_DIR=/app/docs
+CHROMA_DIR=/app/chroma_db
+Use code with caution.
+(If running Linux, use OLLAMA_BASE_URL=http://172.17.0.1:11434 instead).
+
+4. One-Command Launch
+
+bash
+cd rag-stack
+docker compose up --build -d
+Use code with caution.
+Whenever you're ready to test your external application integration or tweak prompt responses, let me know!
+
