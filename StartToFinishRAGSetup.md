@@ -298,3 +298,142 @@ Use code with caution.
 If you want to expose this externally over HTTPS or add a production reverse proxy, let me know:
 • Do you want a Caddy or Nginx reverse proxy configuration with automatic Let's Encrypt SSL?
 • Would you like a Cloudflare Tunnel (cloudflared) docker service to expose port 8000 securely without opening firewall ports?
+
+
+Running a RAG assistant on a CPU-only laptop changes the resource math: inference relies purely on system RAM and CPU memory bandwidth, generating roughly 5–15 tokens per second (or up to 25–40 tok/s if using a sub-2B model). [1] (/goto?url=CAESfgHrOzAV5S2AkSODNJO9mxjTBjOUDqaZJlceHaDQMVxVENwVQUhckDKcx32M5F--MNiJZ7QSvOguCTglIfy44stSZ7C1U9EW4bxE-j-4hz5N2e7xNo2mwLflsLVm2RG_dB46ehpoiWgkvJr1EzlFGx6C_evYjoqWveQruB__cg), [2] (/goto?url=CAESmgEB6zswFQBLIhRZ9tZC2DRDQeUlFiepMRcMMrSYHc1KM8o_snN4cULipAoZQEXEyfgOtNHYceT5yM7BHJe9ldieLMp56L6u0tpWBgW06EoElzzh4LKVUr4oV-uxGujuix71QREg02u1Rqr_ssBF6_THBML8SmtPdZXUFxgQ4uVfQroOwTSSW5ZL1ouwxl_LfqAbyOJInlH58J2Q), [3] (/goto?url=CAESiwEB6zswFVzP3mxDD9ibd7M_uODFupsoiTK4p6wVCJixhrC0UsKnuTPpRLdikO7kF0KVRt6r-if7Ne-cx1VbL8rzB4v9LhQCBAcHQsCrqlQaA2gCSlWBbrpXpRQqUQSXAvev8vPQx4YHmKj6W6HOjNjqkP5Y9zqyLReq4QkPbDOp68PV4GTgxjxEIhvG)
+Strip out all NVIDIA GPU reservations, switch to an ultra-lean 1.7B–3B model, and limit the context window so your laptop stays responsive.
+
+1. CPU-Optimized Model Selection
+
+
+Model	Role	Disk / RAM Size	Speed on CPU (8GB–16GB RAM)
+qwen3:1.7b (or llama3.2:1b)	Fast Chat LLM	~1.3 GB	25–40 tok/s (snappy)
+phi-4-mini (3.8B)	Balanced Reasoning	~2.3 GB	15–25 tok/s (good instructions)
+nomic-embed-text	Embedder	~274 MB	Fast CPU vector generation
+
+
+2. Updated CPU-Only docker-compose.yml
+
+Remove the deploy.resources block and cap Ollama to single-model concurrency: [1] (/goto?url=CAESdgHrOzAVAMD7eISDlsj-VOE0_r6XDJZIPpUVeT8GatCTt7UYoum1oIxduVja2bN6DT2m3C7NHSEYRFukJ0iK5Sv3w97dsJ0tygUdGVP5_3kBOrhainiX8tZoSO51da0V4kopMdirE8M-jDG5CgJmMgae1WsMGio), [2] (/goto?url=CAESiwEB6zswFVzP3mxDD9ibd7M_uODFupsoiTK4p6wVCJixhrC0UsKnuTPpRLdikO7kF0KVRt6r-if7Ne-cx1VbL8rzB4v9LhQCBAcHQsCrqlQaA2gCSlWBbrpXpRQqUQSXAvev8vPQx4YHmKj6W6HOjNjqkP5Y9zqyLReq4QkPbDOp68PV4GTgxjxEIhvG)
+yaml
+version: '3.8'
+
+services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama-cpu
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0:11434
+      - OLLAMA_ORIGINS=*
+      - OLLAMA_MAX_LOADED_MODELS=1  # Keep only 1 model in RAM
+      - OLLAMA_NUM_PARALLEL=1       # Prevent CPU thrashing on concurrent requests
+      - CUDA_VISIBLE_DEVICES=-1     # Force explicit CPU mode
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:11434/api/tags || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+
+  model-init:
+    image: curlimages/curl:latest
+    container_name: ollama-model-initializer
+    depends_on:
+      ollama:
+        condition: service_healthy
+    volumes:
+      - ./scripts/pull-models-cpu.sh:/pull-models.sh:ro
+    environment:
+      - OLLAMA_BASE_URL=http://ollama-cpu:11434
+    entrypoint: ["sh", "/pull-models.sh"]
+    restart: "no"
+
+  rag-api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: rag-api-service
+    restart: unless-stopped
+    depends_on:
+      ollama:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    env_file: .env
+    volumes:
+      - ./docs:/app/docs:ro
+      - chroma_data:/app/chroma_db
+
+volumes:
+  ollama_data:
+    driver: local
+  chroma_data:
+    driver: local
+Use code with caution.
+
+3. Lightweight Auto-Pull Script (scripts/pull-models-cpu.sh)
+
+bash
+#!/usr/bin/env bash
+set -e
+
+OLLAMA_HOST="${OLLAMA_BASE_URL:-http://localhost:11434}"
+echo "Waiting for Ollama on CPU at ${OLLAMA_HOST}..."
+
+until curl -sf "${OLLAMA_HOST}/api/tags" > /dev/null; do
+  sleep 2
+done
+
+echo "Pulling lightweight CPU models..."
+curl -s -X POST "${OLLAMA_HOST}/api/pull" -d '{"name": "qwen3:1.7b"}'
+curl -s -X POST "${OLLAMA_HOST}/api/pull" -d '{"name": "nomic-embed-text"}'
+
+echo "CPU models ready."
+Use code with caution.
+Make executable: chmod +x scripts/pull-models-cpu.sh
+
+4. Tweak Backend for Low-RAM Latency (backend/main.py)
+
+In your LangChain / Ollama call, lower num_ctx to 2048 or 4096 tokens and switch the model name to qwen3:1.7b: [1] (/goto?url=CAESdQHrOzAVZie9zFCsks_Uq2vm5mgSwoSfrs9LyGdyagExHfKCgb6Feaf6Q6d9YdgwTOZbH5GECKYmOCMJuWe99qM3BberxdkWtwInBi3zYRmMmRx0q_3IjCNpGoysrebRjyM5SXe9EcNFcn64RrGi4SZ4L-GUYQ)
+python
+# Inside initialize_knowledge_base():
+llm_instance = ChatOllama(
+    model="qwen3:1.7b",
+    base_url=OLLAMA_BASE_URL,
+    temperature=0,
+    num_ctx=2048,  # Restrict context window to save CPU RAM
+)
+Use code with caution.
+And reduce k=2 or k=3 in similarity_search(payload.message, k=3) so you feed fewer tokens into the CPU prompt.
+
+5. Step-by-Step Laptop Execution
+
+1. Clone/Create Files: Put the updated docker-compose.yml, pull-models-cpu.sh, and backend code into rag-stack/.
+2. Set .env:ini
+APP_API_KEY=laptop_dev_key_123
+OLLAMA_BASE_URL=http://ollama-cpu:11434
+DOCS_DIR=/app/docs
+CHROMA_DIR=/app/chroma_db
+Use code with caution.
+3. Launch Stack:bash
+cd rag-stack
+docker compose up --build -d
+Use code with caution.
+4. Monitor Laptop CPU & RAM Usage:
+	• Watch container logs: docker compose logs -f ollama-cpu
+	• Check Mac Activity Monitor or Windows Task Manager to ensure memory pressure stays green. [1] (/goto?url=CAESdQHrOzAVZie9zFCsks_Uq2vm5mgSwoSfrs9LyGdyagExHfKCgb6Feaf6Q6d9YdgwTOZbH5GECKYmOCMJuWe99qM3BberxdkWtwInBi3zYRmMmRx0q_3IjCNpGoysrebRjyM5SXe9EcNFcn64RrGi4SZ4L-GUYQ)
+5. Test Query:bash
+curl -X POST http://localhost:8000/api/chat \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: laptop_dev_key_123" \
+  -d '{"message": "How do I reset my password?", "session_id": "laptop-test-1"}'
+Use code with caution.
+If your laptop fans spin too loud or responses take over 5 seconds, would you like to:
+• Switch to an even smaller 270MB model (gemma3:270m)?
+• Run Ollama natively on the host OS (ollama serve) instead of inside Docker to reclaim 15–20% CPU overhead?
+
