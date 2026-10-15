@@ -495,3 +495,85 @@ docker compose up --build -d
 Use code with caution.
 Whenever you're ready to test your external application integration or tweak prompt responses, let me know!
 
+
+Converting PDFs and Word docs (.docx) with tables and screenshots into RAG-ready Markdown on a CPU laptop requires a layout-aware local parser. If you use basic text extractors, tables turn into scrambled rows and screenshots get ignored, causing your LLM to hallucinate. [1] (/goto?url=CAESmAEB6zswFfUyriR68549O2NaC8hmZSdcKri53gsxSaglZD6Oa3_3MbnzWUWVLbvB-IM-uYS4Jg1UwQVUFSX2rhUMhoQvNfjhBmcZyQ5ghviDv5mUpYcjy4nCIq-mHHIFwcVlG9XOePAZL0OSQfcdgV-rkx-hKayQmiAi4fJbfys4pqavcrn7lzZXK4oHQTr5DV43VxOsryXJDw), [2] (/goto?url=CAESfAHrOzAVeUr-9PaZC_u0MN0cmfMuhhOSFXhsrIADg1WgzXiLu33u2L-kyedu-7p7y2zkNmVeKjy5drVRul5Jth5AWBwOGYoq_o8-RO6pU1lsCVwy2ZVtfwi3a7RedsQk82PMyRlp2e9HLps2RXMl10NgfvqKF0yBediGXHY)
+
+1. Recommended Local Tools (CPU-Friendly)
+
+
+Tool	Best For	How It Handles Tables & Images	Speed on CPU
+MarkItDown	Fast batch conversion (.pdf, .docx, .pptx)	Converts tables to Markdown syntax; extracts embedded image text where available	Very fast (~1–2s per doc)
+Docling	Complex layouts & dense tables	High-precision table structure recognition; optional local VLM image descriptions	Moderate (~15–30s per page)
+PyMuPDF4LLM	Lightweight native PDF-to-Markdown	Preserves headings and basic text flow	Fast
+
+
+2. Automated Pre-Ingestion Script (scripts/convert_docs.py)
+
+Run this script on your laptop before starting the Docker stack to convert incoming files from an input_raw/ folder into structured .md files inside your docs/ folder.
+python
+import os
+from pathlib import Path
+from markitdown import MarkItDown  # pip install markitdown
+
+RAW_DIR = Path("./input_raw")
+OUT_DIR = Path("./docs/converted")
+OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+md_converter = MarkItDown()
+
+
+def batch_convert():
+  print("Scanning input_raw for PDFs and Word docs...")
+  supported_extensions = {".pdf", ".docx", ".pptx"}
+
+  for file_path in RAW_DIR.rglob("*"):
+    if file_path.suffix.lower() not in supported_extensions:
+      continue
+
+    # Maintain relative subfolder structure
+    relative_path = file_path.relative_to(RAW_DIR)
+    target_md_path = (OUT_DIR / relative_path).with_suffix(".md")
+    target_md_path.parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+      print(f"Converting: {file_path.name} -> {target_md_path}")
+      result = md_converter.convert(str(file_path))
+
+      # Prepend YAML frontmatter for provenance tracking
+      frontmatter = (
+          f"---\n"
+          f"source_file: {file_path.name}\n"
+          f"original_type: {file_path.suffix}\n"
+          f"---\n\n"
+      )
+
+      with open(target_md_path, "w", encoding="utf-8") as f:
+        f.write(frontmatter + result.text_content)
+
+      print(f"Saved structured Markdown: {target_md_path}")
+    except Exception as e:
+      print(f"Failed to convert {file_path}: {e}")
+
+
+if __name__ == "__main__":
+  batch_convert()
+Use code with caution.
+
+3. Handling Screenshots (Visual UI Steps)
+
+If your user guides rely heavily on UI screenshots (e.g., "click the red settings gear shown in Figure 3"), pure text extraction misses the visual context.
+• Option A (Metadata Captioning): Manually add a brief caption underneath screenshot image files or embed alt-text in your source docs (![Settings Gear Location](images/settings_gear.png)).
+• Option B (Local VLM via Ollama): If using Docling, point it to a lightweight local vision model (like llava:7b or granite-vision) to auto-generate text descriptions of cropped pictures, replacing the image block with descriptive text in the Markdown. [1] (/goto?url=CAESYwHrOzAVsqVqjdO1bSd0m1Za3BATO6oGFghPw0lEA3fDXGOmAab-KtfjIXDHWTbCdSKYOfbhOiDdh6i5xEvraenSHkLzH6r7PDaNBVx2T3JECePZtDCZ6rmX8Mc-THcZEOw-4g)
+
+4. Updated End-to-End Workflow on Your Laptop
+
+1. Install Conversion Dependency:bash
+pip install markitdown
+Use code with caution.
+2. Drop Raw Files: Put your .pdf and .docx files into input_raw/products/ and input_raw/support/.
+3. Run Batch Converter:bash
+python scripts/convert_docs.py
+Use code with caution.
+4. Point RAG Pipeline to Converted Docs: Update your .env so DOCS_DIR points to ./docs/converted. Your watchdog script will auto-index the generated Markdown files.
+If your Word/PDF guides contain critical embedded screenshots that the text-only model keeps missing, would you like a quick Python snippet using a local Ollama vision model (llava) to auto-caption those images during conversion?
+Copying...
